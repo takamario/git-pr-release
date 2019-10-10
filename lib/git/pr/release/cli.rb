@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'octokit'
 
 require_relative 'util'
@@ -40,14 +42,14 @@ module Git
           say "Production branch: #{production_branch}", :debug
           say "Staging branch:    #{staging_branch}", :debug
 
-          client = Octokit::Client.new :access_token => obtain_token!
+          client = Octokit::Client.new access_token: obtain_token!
 
           git :remote, 'update', 'origin' unless @no_fetch
 
           ### Fetch merged PRs
 
           merged_feature_head_sha1s = git(
-            :log, '--merges', '--pretty=format:%P', "origin/#{production_branch}..origin/#{staging_branch}"
+            :log, ENV['GIT_PR_RELEASE_STAGING_MERGE_METHOD'] == 'rebase' ? '' : '--merges', '--pretty=format:%P', "origin/#{production_branch}..origin/#{staging_branch}"
           ).map do |line|
             main_sha1, feature_sha1 = line.chomp.split /\s+/
             feature_sha1
@@ -57,8 +59,8 @@ module Git
             sha1, ref = line.chomp.split /\s+/
 
             if merged_feature_head_sha1s.include? sha1
-              if %r<^refs/pull/(\d+)/head$>.match ref
-                pr_number = $1.to_i
+              if %r{^refs/pull/(\d+)/head$}.match ref
+                pr_number = Regexp.last_match(1).to_i
 
                 if git('merge-base', sha1, "origin/#{production_branch}").first.chomp == sha1
                   say "##{pr_number} (#{sha1}) is already merged into #{production_branch}", :debug
@@ -101,11 +103,14 @@ module Git
             say 'Dry-run. Not updating PR', :info
             say pr_title, :notice
             say pr_body, :notice
-            dump_result_as_json( found_release_pr, merged_prs, changed_files ) if @json
+            if @json
+              dump_result_as_json(found_release_pr, merged_prs, changed_files)
+            end
             exit 0
           end
 
-          pr_title, pr_body = nil, nil
+          pr_title = nil
+          pr_body = nil
           release_pr = nil
 
           if create_mode
@@ -129,7 +134,7 @@ module Git
           say pr_body, :debug
 
           updated_pull_request = client.update_pull_request(
-            repository, release_pr.number, :title => pr_title, :body => pr_body
+            repository, release_pr.number, title: pr_title, body: pr_body
           )
 
           unless updated_pull_request
@@ -138,7 +143,7 @@ module Git
           end
 
           labels = ENV.fetch('GIT_PR_RELEASE_LABELS') { git_config('labels') }
-          if not labels.nil? and not labels.empty?
+          if !labels.nil? && !labels.empty?
             labels = labels.split(/\s*,\s*/)
             labeled_pull_request = client.add_labels_to_an_issue(
               repository, release_pr.number, labels
@@ -151,7 +156,7 @@ module Git
           end
 
           say "#{create_mode ? 'Created' : 'Updated'} pull request: #{updated_pull_request.rels[:html].href}", :notice
-          dump_result_as_json( release_pr, merged_prs, changed_files ) if @json
+          dump_result_as_json(release_pr, merged_prs, changed_files) if @json
         end
       end
     end
