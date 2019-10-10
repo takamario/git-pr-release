@@ -47,9 +47,9 @@ module Git
           git :remote, 'update', 'origin' unless @no_fetch
 
           ### Fetch merged PRs
-
+          merge_method = ENV.fetch('GIT_PR_RELEASE_STAGING_MERGE_METHOD', 'merge')
           merged_feature_head_sha1s = git(
-            :log, ENV['GIT_PR_RELEASE_STAGING_MERGE_METHOD'] == 'rebase' ? '' : '--merges', '--pretty=format:%P', "origin/#{production_branch}..origin/#{staging_branch}"
+            :log, merge_method == 'merge' ? '--merges' : '--no-merges', '--pretty=format:%P', "origin/#{production_branch}..origin/#{staging_branch}"
           ).map do |line|
             main_sha1, feature_sha1 = line.chomp.split /\s+/
             feature_sha1
@@ -74,7 +74,7 @@ module Git
             end
           end.compact
 
-          if merged_pull_request_numbers.empty?
+          if merged_pull_request_numbers.empty? && merge_method == 'merge'
             say 'No pull requests to be released', :error
             exit 1
           end

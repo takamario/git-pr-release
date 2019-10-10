@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'erb'
 require 'uri'
 require 'open3'
@@ -23,7 +25,7 @@ class PullRequest
   end
 
   def to_hash
-    { :data => @pr.to_hash }
+    { data: @pr.to_hash }
   end
 
   def mention
@@ -34,7 +36,7 @@ class PullRequest
                 pr.assignee ? "@#{pr.assignee.login}" : pr.user ? "@#{pr.user.login}" : nil
               end
 
-    mention ? " #{mention}" : ""
+    mention ? " #{mention}" : ''
   end
 
   def self.mention_type
@@ -48,7 +50,7 @@ class DummyPullRequest
   end
 
   def to_checklist_item
-    "- [ ] #??? THIS IS DUMMY PULL REQUEST"
+    '- [ ] #??? THIS IS DUMMY PULL REQUEST'
   end
 
   def html_link
@@ -56,82 +58,87 @@ class DummyPullRequest
   end
 
   def to_hash
-    { :data => {} }
+    { data: {} }
   end
 end
 
 def host_and_repository_and_scheme
   @host_and_repository_and_scheme ||= begin
     remote = git(:config, 'remote.origin.url').first.chomp
-    unless %r(^\w+://) === remote
-      remote = "ssh://#{remote.sub(':', '/')}"
-    end
+    remote = "ssh://#{remote.sub(':', '/')}" unless %r{^\w+://} === remote
 
     remote_url = URI.parse(remote)
-    repository = remote_url.path.sub(%r(^/), '').sub(/\.git$/, '')
+    repository = remote_url.path.sub(%r{^/}, '').sub(/\.git$/, '')
 
     host = remote_url.host == 'github.com' ? nil : remote_url.host
-    [ host, repository, remote_url.scheme === 'http' ? 'http' : 'https' ]
+    [host, repository, remote_url.scheme === 'http' ? 'http' : 'https']
   end
 end
 
 def say(message, level)
   color = case level
-    when :trace
-      return unless ENV['DEBUG']
-      nil
-    when :debug
-      return unless ENV['DEBUG']
-      :blue
-    when :info
-      :green
-    when :notice
-      :yellow
-    when :warn
-      :magenta
-    when :error
-      :red
+          when :trace
+            return unless ENV['DEBUG']
+
+            nil
+          when :debug
+            return unless ENV['DEBUG']
+
+            :blue
+          when :info
+            :green
+          when :notice
+            :yellow
+          when :warn
+            :magenta
+          when :error
+            :red
     end
 
-  STDERR.puts message.colorize(color)
+  warn message.colorize(color)
 end
 
 def git(*command)
-  command = [ 'git', *command.map(&:to_s) ]
+  command = ['git', *command.map(&:to_s)]
   say "Executing `#{command.join(' ')}`", :trace
   out, status = Open3.capture2(*command)
   unless status.success?
     raise "Executing `#{command.join(' ')}` failed: #{status}"
   end
+
   out.each_line
 end
 
 def git_config(key)
-  host, _ = host_and_repository_and_scheme()
+  host, = host_and_repository_and_scheme
 
-  plain_key = [ 'pr-release', key ].join('.')
-  host_aware_key = [ 'pr-release', host, key ].compact.join('.')
+  plain_key = ['pr-release', key].join('.')
+  host_aware_key = ['pr-release', host, key].compact.join('.')
 
   begin
     git(:config, '-f', '.git-pr-release', plain_key).first.chomp
-  rescue
-    git(:config, host_aware_key).first.chomp rescue nil
+  rescue StandardError
+    begin
+      git(:config, host_aware_key).first.chomp
+    rescue StandardError
+      nil
+    end
   end
 end
 
 def git_config_set(key, value)
-  host, _ = host_and_repository_and_scheme()
-  host_aware_key = [ 'pr-release', host, key ].compact.join('.')
+  host, = host_and_repository_and_scheme
+  host_aware_key = ['pr-release', host, key].compact.join('.')
 
   git :config, '--global', host_aware_key, value
 end
 
 # First line will be the title of the PR
-DEFAULT_PR_TEMPLATE = <<ERB
-Release <%= Time.now %>
-<% pull_requests.each do |pr| -%>
-<%=  pr.to_checklist_item %>
-<% end -%>
+DEFAULT_PR_TEMPLATE = <<~ERB
+  Release <%= Time.now %>
+  <% pull_requests.each do |pr| -%>
+  <%=  pr.to_checklist_item %>
+  <% end -%>
 ERB
 
 def build_pr_title_and_body(release_pr, merged_prs, changed_files)
@@ -151,11 +158,11 @@ def build_pr_title_and_body(release_pr, merged_prs, changed_files)
 end
 
 def dump_result_as_json(release_pr, merged_prs, changed_files)
-  puts( {
-    :release_pull_request => (release_pr ? PullRequest.new(release_pr) : DummyPullRequest.new).to_hash,
-    :merged_pull_requests => merged_prs.map { |pr| PullRequest.new(pr).to_hash },
-    :changed_files        => changed_files.map { |file| file.to_hash }
-  }.to_json )
+  puts({
+    release_pull_request: (release_pr ? PullRequest.new(release_pr) : DummyPullRequest.new).to_hash,
+    merged_pull_requests: merged_prs.map { |pr| PullRequest.new(pr).to_hash },
+    changed_files: changed_files.map(&:to_hash)
+  }.to_json)
 end
 
 def merge_pr_body(old_body, new_body)
@@ -163,12 +170,12 @@ def merge_pr_body(old_body, new_body)
   pr_body_lines = []
 
   check_status = {}
-  old_body.split(/\r?\n/).each { |line|
-    line.match(/^- \[(?<check_value>[ x])\] #(?<issue_number>\d+)/) { |m|
+  old_body.split(/\r?\n/).each do |line|
+    line.match(/^- \[(?<check_value>[ x])\] #(?<issue_number>\d+)/) do |m|
       say "Found pull-request checkbox \##{m[:issue_number]} is #{m[:check_value]}.", :trace
       check_status[m[:issue_number]] = m[:check_value]
-    }
-  }
+    end
+  end
   old_body_unchecked = old_body.gsub /^- \[[ x]\] \#(\d+)/, '- [ ] #\1'
 
   Diff::LCS.traverse_balanced(old_body_unchecked.split(/\r?\n/), new_body.split(/\r?\n/)) do |event|
@@ -185,7 +192,7 @@ def merge_pr_body(old_body, new_body)
       say "Use old line: #{old_line}", :trace
       pr_body_lines << old_line
     when '!'
-      if [ old_line, new_line ].all? { |line| /^- \[ \]/ === line }
+      if [old_line, new_line].all? { |line| /^- \[ \]/ === line }
         say "Found checklist diff; use old one: #{old_line}", :trace
         pr_body_lines << old_line
       else
@@ -202,10 +209,10 @@ def merge_pr_body(old_body, new_body)
   end
 
   merged_body = pr_body_lines.join("\n")
-  check_status.each { |issue_number, check_value|
+  check_status.each do |issue_number, check_value|
     say "Update pull-request checkbox \##{issue_number} to #{check_value}.", :trace
     merged_body.gsub! /^- \[ \] \##{issue_number}/, "- [#{check_value}] \##{issue_number}"
-  }
+  end
 
   merged_body
 end
@@ -215,13 +222,13 @@ def obtain_token!
 
   unless token
     require 'highline/import'
-    STDERR.puts 'Could not obtain GitHub API token.'
-    STDERR.puts 'Trying to generate token...'
+    warn 'Could not obtain GitHub API token.'
+    warn 'Trying to generate token...'
 
     username = ask('username? ') { |q| q.default = ENV['USER'] }
     password = ask('password? (not saved) ') { |q| q.echo = '*' }
 
-    temporary_client = Octokit::Client.new :login => username, :password => password
+    temporary_client = Octokit::Client.new login: username, password: password
 
     auth = request_authorization(temporary_client, nil)
 
@@ -233,8 +240,8 @@ def obtain_token!
 end
 
 def request_authorization(client, two_factor_code)
-  params = { :scopes => [ 'public_repo', 'repo' ], :note => 'git-pr-release' }
-  params[:headers] = { "X-GitHub-OTP" => two_factor_code} if two_factor_code
+  params = { scopes: %w[public_repo repo], note: 'git-pr-release' }
+  params[:headers] = { 'X-GitHub-OTP' => two_factor_code } if two_factor_code
 
   auth = nil
   begin
@@ -252,5 +259,5 @@ def pull_request_files(client, pull_request)
   return [] if pull_request.nil?
 
   host, repository, scheme = host_and_repository_and_scheme
-  return client.pull_request_files repository, pull_request.number
+  client.pull_request_files repository, pull_request.number
 end
